@@ -2,7 +2,7 @@ name: Update WAQI Data Every 3 Minutes
 
 on:
   schedule:
-    - cron: '*/3 * * * *'  # Runs every 3 minutes
+    - cron: '*/333* * * *'  # Runs every 3 minutes
   workflow_dispatch:   # Allows manual trigger
 
 jobs:
