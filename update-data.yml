@@ -1,0 +1,31 @@
+name: Update WAQI Data
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # This cron expression runs at the start of every hour
+  workflow_dispatch:   # Allows manual trigger via the GitHub Actions interface
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install aiohttp nest_asyncio pymongo requests
+
+      - name: Run update script
+        env:
+          WAQI_API_KEY: ${{ secrets.WAQI_API_KEY }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          DATABASE_NAME: "your_db"             # Replace with your actual database name if needed
+          COLLECTION_NAME: "waqi_stations"       # Replace if necessary
+        run: python app.py
