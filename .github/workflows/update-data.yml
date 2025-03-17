@@ -2,7 +2,7 @@ name: Update WAQI Data
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Runs at the start of every hour
+    - cron: '0 * * * *'  # This runs every hour
   workflow_dispatch:   # Allows manual trigger
 
 jobs:

@@ -12,14 +12,14 @@ nest_asyncio.apply()
 
 # --- Configuration ---
 API_KEY = "c69bd9a20bccfbbe7b4f2e37a17b1a2f2332b423"
-MAX_UID = 100  # For testing, use a lower value; change to 15000 for full-scale run
-BATCH_SIZE = 100  # Adjust accordingly for testing; full run might use 10000
-CONCURRENCY = 50  # Adjust for testing if needed
+MAX_UID = 15000      # Upper limit for UID to try
+BATCH_SIZE = 10000   # Process UIDs in batches of 10,000
+CONCURRENCY = 220    # Maximum number of concurrent requests
 
 # MongoDB connection string (provided)
 MONGO_URI = "mongodb+srv://kandulas:7WiHXWMQZH3DVvyr@cluster0.jsark.mongodb.net/"
-DATABASE_NAME = "aqidb"           # Updated database name
-COLLECTION_NAME = "waqi_stations"  # Collection name
+DATABASE_NAME = "aqidb"         # Your database name
+COLLECTION_NAME = "waqi_stations"   # Collection name
 
 # --- MongoDB Setup ---
 client = pymongo.MongoClient(MONGO_URI)
@@ -57,7 +57,10 @@ async def fetch_station(session: aiohttp.ClientSession, uid: int):
         async with session.get(url) as response:
             data = await response.json()
             if data.get("status") == "ok":
+                print(f"UID {uid}: Data fetched successfully.")
                 return data["data"]
+            else:
+                print(f"UID {uid}: No valid data. Status: {data.get('status')}")
     except Exception as e:
         print(f"Error fetching uid {uid}: {e}")
     return None
@@ -77,14 +80,13 @@ async def run_batches():
     async with aiohttp.ClientSession() as session:
         for batch_start in range(1, MAX_UID + 1, BATCH_SIZE):
             batch_end = min(batch_start + BATCH_SIZE - 1, MAX_UID)
-            print(f"Processing UIDs from {batch_start} to {batch_end}...")
+            print(f"\nProcessing UIDs from {batch_start} to {batch_end}...")
             batch_results = await fetch_batch(batch_start, batch_end, sem, session)
             for station_data in batch_results:
                 update_mongo_with_station(station_data)
             all_results.extend(batch_results)
             print(f"  Valid stations found so far: {len(all_results)}")
-            # For testing, we can comment out the sleep or reduce it:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1)  # brief pause between batches
     return all_results
 
 def update_mongo_with_station(station_data: dict):
@@ -98,9 +100,10 @@ def update_mongo_with_station(station_data: dict):
     if uid is None:
         uid = station_data.get("station", {}).get("name")
     if not uid:
+        print("Skipping station with no uid")
         return
 
-    # Prepare the new reading data
+    # Prepare the new reading data (extract current reading details)
     new_reading = {
         "time": station_data.get("time", {}),
         "aqi": station_data.get("aqi"),
@@ -110,10 +113,14 @@ def update_mongo_with_station(station_data: dict):
     new_time_iso = station_data.get("time", {}).get("iso", "")
     new_date = get_reading_date(new_time_iso)
 
-    # Check if document exists
-    doc = collection.find_one({"uid": uid})
+    try:
+        doc = collection.find_one({"uid": uid})
+    except Exception as e:
+        print(f"Error querying MongoDB for uid {uid}: {e}")
+        return
+
     if doc:
-        # Update current reading
+        print(f"Updating existing document for uid {uid}.")
         update_fields = {"current": station_data}
         readings = doc.get("readings", [])
         if readings:
@@ -125,20 +132,21 @@ def update_mongo_with_station(station_data: dict):
                     {"uid": uid},
                     {"$set": update_fields, "$push": {"readings": new_reading}}
                 )
+                print(f"Appended new reading for uid {uid} on date {new_date}.")
             else:
                 # New day: reset the readings array
                 collection.update_one(
                     {"uid": uid},
                     {"$set": {"current": station_data, "readings": [new_reading]}}
                 )
+                print(f"Reset readings for uid {uid} for new day {new_date}.")
         else:
-            # Create readings array if missing
             collection.update_one(
                 {"uid": uid},
                 {"$set": {"current": station_data, "readings": [new_reading]}}
             )
+            print(f"Created readings array for uid {uid}.")
     else:
-        # Insert new document
         new_doc = {
             "uid": uid,
             "station": station_data.get("station", {}),
@@ -146,6 +154,7 @@ def update_mongo_with_station(station_data: dict):
             "readings": [new_reading]
         }
         collection.insert_one(new_doc)
+        print(f"Inserted new document for uid {uid}.")
 
 def main():
     results = asyncio.run(run_batches())
