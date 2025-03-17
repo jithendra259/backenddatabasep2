@@ -26,6 +26,6 @@ jobs:
         env:
           WAQI_API_KEY: ${{ secrets.WAQI_API_KEY }}
           MONGO_URI: ${{ secrets.MONGO_URI }}
-          DATABASE_NAME: "your_db"             # Replace with your actual database name if needed
+          DATABASE_NAME: "aqidb"             # Replace with your actual database name if needed
           COLLECTION_NAME: "waqi_stations"       # Replace if necessary
         run: python app.py
