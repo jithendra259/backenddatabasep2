@@ -12,14 +12,14 @@ nest_asyncio.apply()
 
 # --- Configuration ---
 API_KEY = "c69bd9a20bccfbbe7b4f2e37a17b1a2f2332b423"
-MAX_UID = 15000      # Upper limit for UID to try
-BATCH_SIZE = 10000   # Process UIDs in batches of 10,000
-CONCURRENCY = 220    # Maximum number of concurrent requests
+MAX_UID = 100  # For testing, use a lower value; change to 15000 for full-scale run
+BATCH_SIZE = 100  # Adjust accordingly for testing; full run might use 10000
+CONCURRENCY = 50  # Adjust for testing if needed
 
 # MongoDB connection string (provided)
 MONGO_URI = "mongodb+srv://kandulas:7WiHXWMQZH3DVvyr@cluster0.jsark.mongodb.net/"
-DATABASE_NAME = "your_db"         # Change to your database name
-COLLECTION_NAME = "waqi_stations"   # Collection name
+DATABASE_NAME = "aqidb"           # Updated database name
+COLLECTION_NAME = "waqi_stations"  # Collection name
 
 # --- MongoDB Setup ---
 client = pymongo.MongoClient(MONGO_URI)
@@ -83,7 +83,8 @@ async def run_batches():
                 update_mongo_with_station(station_data)
             all_results.extend(batch_results)
             print(f"  Valid stations found so far: {len(all_results)}")
-            await asyncio.sleep(1)  # brief pause between batches
+            # For testing, we can comment out the sleep or reduce it:
+            await asyncio.sleep(0.5)
     return all_results
 
 def update_mongo_with_station(station_data: dict):
@@ -99,7 +100,7 @@ def update_mongo_with_station(station_data: dict):
     if not uid:
         return
 
-    # Prepare the new reading data (extract current reading details)
+    # Prepare the new reading data
     new_reading = {
         "time": station_data.get("time", {}),
         "aqi": station_data.get("aqi"),
@@ -114,7 +115,6 @@ def update_mongo_with_station(station_data: dict):
     if doc:
         # Update current reading
         update_fields = {"current": station_data}
-        # Decide whether to append to the readings array or reset it based on date
         readings = doc.get("readings", [])
         if readings:
             last_reading = readings[-1]
@@ -132,7 +132,7 @@ def update_mongo_with_station(station_data: dict):
                     {"$set": {"current": station_data, "readings": [new_reading]}}
                 )
         else:
-            # No readings array exists; create one
+            # Create readings array if missing
             collection.update_one(
                 {"uid": uid},
                 {"$set": {"current": station_data, "readings": [new_reading]}}
@@ -150,11 +150,11 @@ def update_mongo_with_station(station_data: dict):
 def main():
     results = asyncio.run(run_batches())
     print(f"\nTotal valid stations fetched: {len(results)}")
-    filename = "waqi_stations_500k.json"
+    filename = "waqi_stations_test.json"
     try:
         with open(filename, "w") as f:
             json.dump(results, f, indent=2)
-        print(f"All station data saved to {filename}")
+        print(f"All fetched station data saved to {filename}")
     except Exception as e:
         print(f"Error saving data: {e}")
 
