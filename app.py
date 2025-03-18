@@ -9,7 +9,7 @@ from collections import defaultdict
 # --- Configuration ---
 API_KEY = "c69bd9a20bccfbbe7b4f2e37a17b1a2f2332b423"
 MAX_UID = 15000          # Change as needed
-BATCH_SIZE = 10000        # Adjust based on performance
+BATCH_SIZE = 10000       # Adjust based on performance
 CONCURRENCY = 800
 
 MONGO_URI = "mongodb+srv://kandulas:7WiHXWMQZH3DVvyr@cluster0.jsark.mongodb.net/"
@@ -181,25 +181,14 @@ def update_daily_forecast():
         print(f"Updated forecast for station idx {doc.get('idx')} ({doc.get('city', {}).get('name', '')}).")
 
 def main():
-    last_processed_day = None
     try:
-        while True:
-            print("\nStarting data fetch at", datetime.utcnow().isoformat())
-            # Run asynchronous data fetch and update operations
-            asyncio.run(run_batches())
-            # Prune readings older than 48 hours
-            prune_old_readings()
-            # Check if the day has changed, then update daily forecasts for completed days
-            current_day = datetime.utcnow().date().isoformat()
-            if last_processed_day is None or current_day != last_processed_day:
-                update_daily_forecast()
-                last_processed_day = current_day
-            # Sleep until the start of the next hour
-            now = datetime.utcnow()
-            next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
-            sleep_seconds = (next_hour - now).total_seconds()
-            print(f"Sleeping for {sleep_seconds} seconds until next run...")
-            time.sleep(sleep_seconds)
+        print("\nStarting data fetch at", datetime.utcnow().isoformat())
+        # Run asynchronous data fetch and update operations once
+        asyncio.run(run_batches())
+        # Prune readings older than 48 hours
+        prune_old_readings()
+        # Update daily forecasts
+        update_daily_forecast()
     except KeyboardInterrupt:
         print("Interrupted by user.")
     finally:
