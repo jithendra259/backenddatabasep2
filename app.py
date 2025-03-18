@@ -1,180 +1,201 @@
 import asyncio
 import aiohttp
-import json
-import nest_asyncio
 import pymongo
 import re
 import time
 from datetime import datetime, timedelta
-
-# Apply nest_asyncio to allow nested event loops (necessary in Colab/Jupyter)
-nest_asyncio.apply()
+from collections import defaultdict
 
 # --- Configuration ---
 API_KEY = "c69bd9a20bccfbbe7b4f2e37a17b1a2f2332b423"
-MAX_UID = 5          # For testing, use 5; change to 15000 for full run
-BATCH_SIZE = 5       # For testing, use 5; change to 10000 for full run
-CONCURRENCY = 5      # Adjust as needed
+MAX_UID = 15000          # Change as needed
+BATCH_SIZE = 10000        # Adjust based on performance
+CONCURRENCY = 800
 
-# MongoDB connection string (provided)
 MONGO_URI = "mongodb+srv://kandulas:7WiHXWMQZH3DVvyr@cluster0.jsark.mongodb.net/"
-DATABASE_NAME = "aqidb"             # Your database name
-COLLECTION_NAME = "waqi_stations"    # Collection name
+DATABASE_NAME = "aqidb"
+COLLECTION_NAME = "waqi_stations"
 
 # --- MongoDB Setup ---
-try:
-    client = pymongo.MongoClient(MONGO_URI)
-    db = client[DATABASE_NAME]
-    collection = db[COLLECTION_NAME]
-    print("MongoDB connected.")
-except Exception as e:
-    print("Error connecting to MongoDB:", e)
-    exit(1)
+client = pymongo.MongoClient(MONGO_URI)
+db = client[DATABASE_NAME]
+collection = db[COLLECTION_NAME]
 
 # --- Helper Functions ---
 
-def parse_station_country(station_name: str) -> str:
-    """
-    Parse the station name (a comma-separated string) to extract the country.
-    Removes any parenthesized text.
-    """
-    parts = [p.strip() for p in station_name.split(",") if p.strip()]
-    if len(parts) >= 2:
-        country = parts[-1]
-        country = re.sub(r"\s*\(.*\)", "", country)
-        return country
-    return "Unknown"
-
-def get_reading_date(iso_time: str) -> str:
-    """Extract the date portion (YYYY-MM-DD) from an ISO timestamp string."""
+def get_date_from_iso(iso_str: str) -> str:
+    """Extract the YYYY-MM-DD part from an ISO timestamp."""
     try:
-        return iso_time.split("T")[0]
+        return iso_str.split("T")[0]
     except Exception:
-        return ""
+        return None
 
 async def fetch_station(session: aiohttp.ClientSession, uid: int):
     """
-    Fetch station details for a given UID using the WAQI feed endpoint.
-    Returns the station data if the API response status is "ok", otherwise None.
+    Fetch station details for a given UID.
+    Returns station data if API returns status ok.
     """
     url = f"https://api.waqi.info/feed/@{uid}/?token={API_KEY}"
     try:
         async with session.get(url) as response:
             data = await response.json()
             if data.get("status") == "ok":
-                print(f"UID {uid}: Data fetched successfully.")
                 return data["data"]
-            else:
-                print(f"UID {uid}: Invalid response. Status: {data.get('status')}")
     except Exception as e:
         print(f"Error fetching uid {uid}: {e}")
     return None
 
-async def bound_fetch(sem: asyncio.Semaphore, session: aiohttp.ClientSession, uid: int):
-    async with sem:
-        return await fetch_station(session, uid)
-
 async def fetch_batch(start: int, end: int, sem: asyncio.Semaphore, session: aiohttp.ClientSession):
-    tasks = [bound_fetch(sem, session, uid) for uid in range(start, end + 1)]
+    tasks = [asyncio.create_task(fetch_station(session, uid)) for uid in range(start, end + 1)]
     results = await asyncio.gather(*tasks)
-    return [res for res in results if res is not None]
+    return [res for res in results if res]
 
 async def run_batches():
     sem = asyncio.Semaphore(CONCURRENCY)
-    all_results = []
     async with aiohttp.ClientSession() as session:
         for batch_start in range(1, MAX_UID + 1, BATCH_SIZE):
             batch_end = min(batch_start + BATCH_SIZE - 1, MAX_UID)
             print(f"\nProcessing UIDs from {batch_start} to {batch_end}...")
             batch_results = await fetch_batch(batch_start, batch_end, sem, session)
             for station_data in batch_results:
-                update_mongo_with_station(station_data)
-            all_results.extend(batch_results)
-            print(f"  Valid stations found so far: {len(all_results)}")
-            await asyncio.sleep(1)  # brief pause between batches
-    return all_results
+                await update_mongo_with_station(station_data)
+            await asyncio.sleep(1)  # Pause briefly between batches
 
-def update_mongo_with_station(station_data: dict):
+async def update_mongo_with_station(station_data: dict):
     """
-    Update or insert a station document in MongoDB.
-    - If a document with the given uid exists, update its current reading and:
-      * If the reading is from the current day, append the new reading to a 'readings' array.
-      * Otherwise, reset the readings array with the new reading.
-    - If no document exists, insert a new document with station metadata, current reading,
-      and an initial 'readings' array.
+    Update or insert a station document.
+      - If a document exists for a given idx and city name, push the new reading.
+      - Otherwise, insert a new document (with forecast field initialized).
     """
-    # Use the uid from data if available; otherwise, fallback to station name.
-    uid = station_data.get("uid")
-    if uid is None:
-        uid = station_data.get("station", {}).get("name")
-    uid_str = str(uid).strip()
-    if not uid_str:
-        print("Skipping station with no uid or station name.")
+    idx = station_data.get("idx")
+    city = station_data.get("city", {}).get("name", "")
+    geo = station_data.get("city", {}).get("geo", [])
+    if not idx or not city:
+        print("Skipping station due to missing idx or city name.")
         return
 
-    # Update station_data with uid so that it's stored in the document
-    station_data["uid"] = uid_str
-
+    query = {"idx": idx, "city.name": city}
+    existing_doc = collection.find_one(query)
+    timestamp = datetime.utcnow()
     new_reading = {
         "time": station_data.get("time", {}),
         "aqi": station_data.get("aqi"),
-        "iaqi": station_data.get("iaqi")
+        "iaqi": station_data.get("iaqi"),
+        "updated_at": timestamp
     }
-    new_time_iso = station_data.get("time", {}).get("iso", "")
-    new_date = get_reading_date(new_time_iso)
-
-    try:
-        doc = collection.find_one({"uid": uid_str})
-    except Exception as e:
-        print(f"Error querying MongoDB for uid {uid_str}: {e}")
-        return
-
-    if doc:
-        print(f"Updating document for uid {uid_str}.")
-        update_fields = {"current": station_data}
-        readings = doc.get("readings", [])
-        if readings:
-            last_reading = readings[-1]
-            last_date = get_reading_date(last_reading.get("time", {}).get("iso", ""))
-            if last_date == new_date:
-                result = collection.update_one(
-                    {"uid": uid_str},
-                    {"$set": update_fields, "$push": {"readings": new_reading}}
-                )
-                print(f"Appended new reading for uid {uid_str} on {new_date}. (Matched: {result.matched_count}, Modified: {result.modified_count})")
-            else:
-                result = collection.update_one(
-                    {"uid": uid_str},
-                    {"$set": {"current": station_data, "readings": [new_reading]}}
-                )
-                print(f"New day detected. Reset readings for uid {uid_str} to new day {new_date}. (Matched: {result.matched_count}, Modified: {result.modified_count})")
-        else:
-            result = collection.update_one(
-                {"uid": uid_str},
-                {"$set": {"current": station_data, "readings": [new_reading]}}
-            )
-            print(f"Created readings array for uid {uid_str}. (Matched: {result.matched_count}, Modified: {result.modified_count})")
+    if existing_doc:
+        collection.update_one(
+            query,
+            {"$set": {"current": station_data, "updated_at": timestamp},
+             "$push": {"readings": new_reading}}
+        )
+        print(f"Updated station idx {idx} ({city}).")
     else:
         new_doc = {
-            "uid": uid_str,
+            "idx": idx,
+            "city": {"name": city, "geo": geo},
             "station": station_data.get("station", {}),
             "current": station_data,
-            "readings": [new_reading]
+            "readings": [new_reading],
+            "forecast": {},  # Initialize forecast field
+            "created_at": timestamp,
+            "updated_at": timestamp
         }
-        try:
-            result = collection.insert_one(new_doc)
-            print(f"Inserted new document for uid {uid_str}. Inserted ID: {result.inserted_id}")
-        except Exception as e:
-            print(f"Error inserting new document for uid {uid_str}: {e}")
+        collection.insert_one(new_doc)
+        print(f"Inserted new station idx {idx} ({city}).")
+
+def prune_old_readings():
+    """
+    Remove any readings older than 48 hours from all documents.
+    """
+    cutoff = datetime.utcnow() - timedelta(hours=48)
+    result = collection.update_many({}, {"$pull": {"readings": {"updated_at": {"$lt": cutoff}}}})
+    print(f"Pruned old readings from {result.modified_count} documents.")
+
+def compute_daily_summary(readings: list, day: str, param: str) -> dict:
+    """
+    Compute average, min, and max for a given parameter from readings on a specific day.
+    For top-level 'aqi', use reading['aqi']. For other parameters, check within 'iaqi'.
+    """
+    values = []
+    for reading in readings:
+        iso_time = reading.get("time", {}).get("iso")
+        reading_day = get_date_from_iso(iso_time) if iso_time else None
+        if reading_day == day:
+            if param == "aqi":
+                value = reading.get("aqi")
+                if isinstance(value, (int, float)):
+                    values.append(value)
+            else:
+                iaqi = reading.get("iaqi", {})
+                if param in iaqi:
+                    # Assume value is stored under key 'v' or directly as a number.
+                    param_obj = iaqi.get(param)
+                    if isinstance(param_obj, dict) and "v" in param_obj:
+                        value = param_obj["v"]
+                    elif isinstance(param_obj, (int, float)):
+                        value = param_obj
+                    else:
+                        value = None
+                    if isinstance(value, (int, float)):
+                        values.append(value)
+    if not values:
+        return None
+    avg_val = sum(values) / len(values)
+    return {"day": day, "avg": round(avg_val, 2), "min": min(values), "max": max(values)}
+
+def update_daily_forecast():
+    """
+    For each station document, aggregate the day's readings (for days before today) and
+    update the forecast field with summary stats (avg, min, max) for defined parameters.
+    """
+    today = datetime.utcnow().date().isoformat()
+    # Define parameters to aggregate. You can expand this list as needed.
+    parameters = ["aqi", "o3", "pm10", "pm25", "uvi", "no2", "dew", "p", "t", "w", "wg"]
+    
+    for doc in collection.find({}):
+        readings = doc.get("readings", [])
+        forecast = doc.get("forecast", {})
+        # Collect unique days (except today) from the readings
+        days = set()
+        for reading in readings:
+            iso_time = reading.get("time", {}).get("iso")
+            if iso_time:
+                day = get_date_from_iso(iso_time)
+                if day and day < today:
+                    days.add(day)
+        if not days:
+            continue
+        for day in days:
+            for param in parameters:
+                # Check if forecast for this day and parameter already exists
+                summaries = forecast.get(param, [])
+                if any(summary.get("day") == day for summary in summaries):
+                    continue
+                summary = compute_daily_summary(readings, day, param)
+                if summary:
+                    summaries.append(summary)
+                    forecast[param] = summaries
+        # Update the document with the new forecast data
+        collection.update_one({"_id": doc["_id"]}, {"$set": {"forecast": forecast}})
+        print(f"Updated forecast for station idx {doc.get('idx')} ({doc.get('city', {}).get('name', '')}).")
 
 def main():
+    last_processed_day = None
     try:
         while True:
-            print("\nStarting data fetch at", datetime.now().isoformat())
-            results = asyncio.run(run_batches())
-            print(f"Total valid stations fetched in this run: {len(results)}")
+            print("\nStarting data fetch at", datetime.utcnow().isoformat())
+            # Run asynchronous data fetch and update operations
+            asyncio.run(run_batches())
+            # Prune readings older than 48 hours
+            prune_old_readings()
+            # Check if the day has changed, then update daily forecasts for completed days
+            current_day = datetime.utcnow().date().isoformat()
+            if last_processed_day is None or current_day != last_processed_day:
+                update_daily_forecast()
+                last_processed_day = current_day
             # Sleep until the start of the next hour
-            now = datetime.now()
+            now = datetime.utcnow()
             next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
             sleep_seconds = (next_hour - now).total_seconds()
             print(f"Sleeping for {sleep_seconds} seconds until next run...")
@@ -186,5 +207,4 @@ def main():
         print("MongoDB connection closed.")
 
 if __name__ == "__main__":
-    from datetime import timedelta  # Import timedelta here
     main()
