@@ -51,8 +51,9 @@ async def fetch_batch(start: int, end: int, sem: asyncio.Semaphore, session: aio
     return [res for res in results if res]
 
 async def run_batches():
+    timeout = aiohttp.ClientTimeout(total=30)  # 30-second timeout for each request
     sem = asyncio.Semaphore(CONCURRENCY)
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         for batch_start in range(1, MAX_UID + 1, BATCH_SIZE):
             batch_end = min(batch_start + BATCH_SIZE - 1, MAX_UID)
             print(f"\nProcessing UIDs from {batch_start} to {batch_end}...")
@@ -60,6 +61,7 @@ async def run_batches():
             for station_data in batch_results:
                 await update_mongo_with_station(station_data)
             await asyncio.sleep(1)  # Pause briefly between batches
+
 
 async def update_mongo_with_station(station_data: dict):
     """
