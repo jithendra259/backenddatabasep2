@@ -33,7 +33,7 @@ def get_date_from_iso(iso_str: str) -> str:
 async def fetch_station(session: aiohttp.ClientSession, uid: int):
     """
     Fetch station details for a given UID.
-    Returns station data if API returns status ok.
+    Returns station data if API returns status 'ok'.
     """
     url = f"https://api.waqi.info/feed/@{uid}/?token={API_KEY}"
     try:
@@ -46,6 +46,7 @@ async def fetch_station(session: aiohttp.ClientSession, uid: int):
     return None
 
 async def fetch_batch(start: int, end: int, sem: asyncio.Semaphore, session: aiohttp.ClientSession):
+    """Fetch a batch of stations concurrently and return only valid results."""
     tasks = [asyncio.create_task(fetch_station(session, uid)) for uid in range(start, end + 1)]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     valid_results = []
@@ -57,7 +58,8 @@ async def fetch_batch(start: int, end: int, sem: asyncio.Semaphore, session: aio
     return valid_results
 
 async def run_batches():
-    timeout = aiohttp.ClientTimeout(total=30)  # 30-second timeout for each request
+    """Run the fetching process in batches with a 30-second timeout per request."""
+    timeout = aiohttp.ClientTimeout(total=30)
     sem = asyncio.Semaphore(CONCURRENCY)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         for batch_start in range(1, MAX_UID + 1, BATCH_SIZE):
@@ -70,7 +72,7 @@ async def run_batches():
 
 async def update_mongo_with_station(station_data: dict):
     """
-    Update or insert a station document.
+    Update or insert a station document:
       - If a document exists for a given idx and city name, push the new reading.
       - Otherwise, insert a new document (with forecastdaily field initialized).
     """
@@ -163,13 +165,20 @@ def update_daily_forecast():
     today = datetime.now(timezone.utc).date().isoformat()
     parameters = ["aqi", "o3", "pm10", "pm25", "uvi", "no2", "dew", "p", "t", "w", "wg"]
 
-    # Convert the cursor to a list to prevent cursor timeout
-    docs = list(collection.find({}))
+    # Use no_cursor_timeout to avoid cursor timeout issues and explicitly close the cursor.
+    cursor = collection.find({}, no_cursor_timeout=True)
+    try:
+        docs = list(cursor)
+    finally:
+        cursor.close()
+    
     for doc in docs:
         readings = doc.get("readings", [])
         forecastdaily = doc.get("forecastdaily", {})
+        # Gather unique days (except today) from the readings
         days = {get_date_from_iso(reading.get("time", {}).get("iso"))
-                for reading in readings if reading.get("time", {}).get("iso")
+                for reading in readings
+                if reading.get("time", {}).get("iso")
                 and get_date_from_iso(reading.get("time", {}).get("iso")) < today}
         if not days:
             continue
@@ -194,6 +203,7 @@ def main():
         prune_old_readings()
         # Update daily forecasts
         update_daily_forecast()
+        print("Update complete. Exiting.")
     except KeyboardInterrupt:
         print("Interrupted by user.")
     finally:
