@@ -3,7 +3,7 @@ import aiohttp
 import pymongo
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 # --- Configuration ---
@@ -33,7 +33,7 @@ def get_date_from_iso(iso_str: str) -> str:
 async def fetch_station(session: aiohttp.ClientSession, uid: int):
     """
     Fetch station details for a given UID.
-    Returns station data if API returns status 'ok'.
+    Returns station data if API returns status ok.
     """
     url = f"https://api.waqi.info/feed/@{uid}/?token={API_KEY}"
     try:
@@ -46,7 +46,6 @@ async def fetch_station(session: aiohttp.ClientSession, uid: int):
     return None
 
 async def fetch_batch(start: int, end: int, sem: asyncio.Semaphore, session: aiohttp.ClientSession):
-    """Create tasks for a batch of UIDs and return valid responses."""
     tasks = [asyncio.create_task(fetch_station(session, uid)) for uid in range(start, end + 1)]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     valid_results = []
@@ -58,8 +57,7 @@ async def fetch_batch(start: int, end: int, sem: asyncio.Semaphore, session: aio
     return valid_results
 
 async def run_batches():
-    """Run the fetching process in batches with a 30-second timeout per request."""
-    timeout = aiohttp.ClientTimeout(total=30)
+    timeout = aiohttp.ClientTimeout(total=30)  # 30-second timeout for each request
     sem = asyncio.Semaphore(CONCURRENCY)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         for batch_start in range(1, MAX_UID + 1, BATCH_SIZE):
@@ -72,7 +70,7 @@ async def run_batches():
 
 async def update_mongo_with_station(station_data: dict):
     """
-    Update or insert a station document:
+    Update or insert a station document.
       - If a document exists for a given idx and city name, push the new reading.
       - Otherwise, insert a new document (with forecastdaily field initialized).
     """
@@ -90,7 +88,7 @@ async def update_mongo_with_station(station_data: dict):
         print(f"Error querying MongoDB for {query}: {e}")
         return
 
-    timestamp = datetime.utcnow()
+    timestamp = datetime.now(timezone.utc)
     new_reading = {
         "time": station_data.get("time", {}),
         "aqi": station_data.get("aqi"),
@@ -122,7 +120,7 @@ def prune_old_readings():
     """
     Remove any readings older than 48 hours from all documents.
     """
-    cutoff = datetime.utcnow() - timedelta(hours=48)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
     result = collection.update_many({}, {"$pull": {"readings": {"updated_at": {"$lt": cutoff}}}})
     print(f"Pruned old readings from {result.modified_count} documents.")
 
@@ -162,7 +160,7 @@ def update_daily_forecast():
     For each station document, aggregate the day's readings (for days before today) and
     update the forecastdaily field with summary stats (avg, min, max) for defined parameters.
     """
-    today = datetime.utcnow().date().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
     parameters = ["aqi", "o3", "pm10", "pm25", "uvi", "no2", "dew", "p", "t", "w", "wg"]
 
     # Convert the cursor to a list to prevent cursor timeout
@@ -189,7 +187,7 @@ def update_daily_forecast():
 
 def main():
     try:
-        print("\nStarting data fetch at", datetime.utcnow().isoformat())
+        print("\nStarting data fetch at", datetime.now(timezone.utc).isoformat())
         # Run asynchronous data fetch and update operations once
         asyncio.run(run_batches())
         # Prune readings older than 48 hours
