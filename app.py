@@ -33,7 +33,7 @@ def get_date_from_iso(iso_str: str) -> str:
 async def fetch_station(session: aiohttp.ClientSession, uid: int):
     """
     Fetch station details for a given UID.
-    Returns station data if API returns status ok.
+    Returns station data if API returns status 'ok'.
     """
     url = f"https://api.waqi.info/feed/@{uid}/?token={API_KEY}"
     try:
@@ -46,12 +46,20 @@ async def fetch_station(session: aiohttp.ClientSession, uid: int):
     return None
 
 async def fetch_batch(start: int, end: int, sem: asyncio.Semaphore, session: aiohttp.ClientSession):
+    """Create tasks for a batch of UIDs and return valid responses."""
     tasks = [asyncio.create_task(fetch_station(session, uid)) for uid in range(start, end + 1)]
-    results = await asyncio.gather(*tasks)
-    return [res for res in results if res]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    valid_results = []
+    for res in results:
+        if isinstance(res, Exception):
+            print(f"Error in fetch_batch: {res}")
+        elif res is not None:
+            valid_results.append(res)
+    return valid_results
 
 async def run_batches():
-    timeout = aiohttp.ClientTimeout(total=30)  # 30-second timeout for each request
+    """Run the fetching process in batches with a 30-second timeout per request."""
+    timeout = aiohttp.ClientTimeout(total=30)
     sem = asyncio.Semaphore(CONCURRENCY)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         for batch_start in range(1, MAX_UID + 1, BATCH_SIZE):
@@ -64,7 +72,7 @@ async def run_batches():
 
 async def update_mongo_with_station(station_data: dict):
     """
-    Update or insert a station document.
+    Update or insert a station document:
       - If a document exists for a given idx and city name, push the new reading.
       - Otherwise, insert a new document (with forecastdaily field initialized).
     """
@@ -76,7 +84,12 @@ async def update_mongo_with_station(station_data: dict):
         return
 
     query = {"idx": idx, "city.name": city}
-    existing_doc = collection.find_one(query)
+    try:
+        existing_doc = collection.find_one(query)
+    except Exception as e:
+        print(f"Error querying MongoDB for {query}: {e}")
+        return
+
     timestamp = datetime.utcnow()
     new_reading = {
         "time": station_data.get("time", {}),
@@ -130,7 +143,6 @@ def compute_daily_summary(readings: list, day: str, param: str) -> dict:
             else:
                 iaqi = reading.get("iaqi", {})
                 if param in iaqi:
-                    # Assume value is stored under key 'v' or directly as a number.
                     param_obj = iaqi.get(param)
                     if isinstance(param_obj, dict) and "v" in param_obj:
                         value = param_obj["v"]
@@ -151,23 +163,16 @@ def update_daily_forecast():
     update the forecastdaily field with summary stats (avg, min, max) for defined parameters.
     """
     today = datetime.utcnow().date().isoformat()
-    # Define parameters to aggregate. You can expand this list as needed.
     parameters = ["aqi", "o3", "pm10", "pm25", "uvi", "no2", "dew", "p", "t", "w", "wg"]
 
     # Convert the cursor to a list to prevent cursor timeout
     docs = list(collection.find({}))
-    
     for doc in docs:
         readings = doc.get("readings", [])
         forecastdaily = doc.get("forecastdaily", {})
-        # Collect unique days (except today) from the readings
-        days = set()
-        for reading in readings:
-            iso_time = reading.get("time", {}).get("iso")
-            if iso_time:
-                day = get_date_from_iso(iso_time)
-                if day and day < today:
-                    days.add(day)
+        days = {get_date_from_iso(reading.get("time", {}).get("iso"))
+                for reading in readings if reading.get("time", {}).get("iso")
+                and get_date_from_iso(reading.get("time", {}).get("iso")) < today}
         if not days:
             continue
         for day in days:
@@ -179,7 +184,6 @@ def update_daily_forecast():
                 if summary:
                     summaries.append(summary)
                     forecastdaily[param] = summaries
-        # Update the document with the new forecastdaily data
         collection.update_one({"_id": doc["_id"]}, {"$set": {"forecastdaily": forecastdaily}})
         print(f"Updated forecast for station idx {doc.get('idx')} ({doc.get('city', {}).get('name', '')}).")
 
