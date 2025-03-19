@@ -154,8 +154,11 @@ def update_daily_forecast():
     today = datetime.utcnow().date().isoformat()
     # Define parameters to aggregate. You can expand this list as needed.
     parameters = ["aqi", "o3", "pm10", "pm25", "uvi", "no2", "dew", "p", "t", "w", "wg"]
+
+    # Convert the cursor to a list to prevent cursor timeout
+    docs = list(collection.find({}))
     
-    for doc in collection.find({}):
+    for doc in docs:
         readings = doc.get("readings", [])
         forecast = doc.get("forecast", {})
         # Collect unique days (except today) from the readings
