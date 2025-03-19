@@ -62,12 +62,11 @@ async def run_batches():
                 await update_mongo_with_station(station_data)
             await asyncio.sleep(1)  # Pause briefly between batches
 
-
 async def update_mongo_with_station(station_data: dict):
     """
     Update or insert a station document.
       - If a document exists for a given idx and city name, push the new reading.
-      - Otherwise, insert a new document (with forecast field initialized).
+      - Otherwise, insert a new document (with forecastdaily field initialized).
     """
     idx = station_data.get("idx")
     city = station_data.get("city", {}).get("name", "")
@@ -99,7 +98,7 @@ async def update_mongo_with_station(station_data: dict):
             "station": station_data.get("station", {}),
             "current": station_data,
             "readings": [new_reading],
-            "forecast": {},  # Initialize forecast field
+            "forecastdaily": {},  # Initialize forecastdaily field
             "created_at": timestamp,
             "updated_at": timestamp
         }
@@ -149,7 +148,7 @@ def compute_daily_summary(readings: list, day: str, param: str) -> dict:
 def update_daily_forecast():
     """
     For each station document, aggregate the day's readings (for days before today) and
-    update the forecast field with summary stats (avg, min, max) for defined parameters.
+    update the forecastdaily field with summary stats (avg, min, max) for defined parameters.
     """
     today = datetime.utcnow().date().isoformat()
     # Define parameters to aggregate. You can expand this list as needed.
@@ -160,7 +159,7 @@ def update_daily_forecast():
     
     for doc in docs:
         readings = doc.get("readings", [])
-        forecast = doc.get("forecast", {})
+        forecastdaily = doc.get("forecastdaily", {})
         # Collect unique days (except today) from the readings
         days = set()
         for reading in readings:
@@ -173,16 +172,15 @@ def update_daily_forecast():
             continue
         for day in days:
             for param in parameters:
-                # Check if forecast for this day and parameter already exists
-                summaries = forecast.get(param, [])
+                summaries = forecastdaily.get(param, [])
                 if any(summary.get("day") == day for summary in summaries):
                     continue
                 summary = compute_daily_summary(readings, day, param)
                 if summary:
                     summaries.append(summary)
-                    forecast[param] = summaries
-        # Update the document with the new forecast data
-        collection.update_one({"_id": doc["_id"]}, {"$set": {"forecast": forecast}})
+                    forecastdaily[param] = summaries
+        # Update the document with the new forecastdaily data
+        collection.update_one({"_id": doc["_id"]}, {"$set": {"forecastdaily": forecastdaily}})
         print(f"Updated forecast for station idx {doc.get('idx')} ({doc.get('city', {}).get('name', '')}).")
 
 def main():
