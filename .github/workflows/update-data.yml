@@ -10,17 +10,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4  # Updated to latest version
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: '3.9'
+          cache: 'pip'  # Enables caching for Python packages
 
       - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install aiohttp nest_asyncio pymongo requests
+          pip install --upgrade pip
+          pip install -r requirements.txt  # Use a requirements file
 
       - name: Run update script
         env:
