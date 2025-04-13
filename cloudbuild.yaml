@@ -1,0 +1,29 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/aqidatabase', '.']
+  
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/aqidatabase']
+  
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'aqidatabase'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/aqidatabase'
+      - '--platform'
+      - 'managed'
+      - '--region'
+      - 'us-central1'
+      - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'WAQI_API_KEY=${_WAQI_API_KEY},MONGO_URI=${_MONGO_URI},DATABASE_NAME=aqidb,COLLECTION_NAME=waqi_stations'
+
+substitutions:
+  _WAQI_API_KEY: '' # Will be set in Cloud Build trigger
+  _MONGO_URI: ''    # Will be set in Cloud Build trigger
