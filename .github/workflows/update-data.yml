@@ -29,4 +29,6 @@ jobs:
           MONGO_URI: ${{ secrets.MONGO_URI }}
           DATABASE_NAME: "aqidb"
           COLLECTION_NAME: "waqi_stations"
-        run: python app.py
+        run: |
+          python -u app.py || exit 1  # -u for unbuffered output
+        continue-on-error: false
