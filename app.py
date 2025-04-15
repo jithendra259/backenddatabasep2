@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 # --- Configuration ---
 API_KEY = "c69bd9a20bccfbbe7b4f2e37a17b1a2f2332b423"
-START_UID = 1000         # Start fetching from UID 1000
+START_UID = 1     # Start fetching from UID 1000
 MAX_UID = 15000
 BATCH_SIZE = 10000
 CONCURRENCY = 800
