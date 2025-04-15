@@ -5,16 +5,10 @@ from datetime import datetime, timezone
 
 # --- Configuration ---
 API_KEY = "c69bd9a20bccfbbe7b4f2e37a17b1a2f2332b423"
-<<<<<<< HEAD
-START_UID = 1        # Start fetching from UID 1000
+START_UID = 1000         # Start fetching from UID 1000
 MAX_UID = 15000
 BATCH_SIZE = 10000
 CONCURRENCY = 800
-=======
-MAX_UID = 15000          # Change as needed
-BATCH_SIZE = 15000       # Adjust based on performance
-CONCURRENCY = 15000
->>>>>>> f1d8cf59551baa5cd89671bbb55e74f0a9d95844
 
 MONGO_URI = "mongodb+srv://kandulas:7WiHXWMQZH3DVvyr@cluster0.jsark.mongodb.net/"
 DATABASE_NAME = "aqidb"
