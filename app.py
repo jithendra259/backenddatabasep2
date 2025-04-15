@@ -9,8 +9,8 @@ from collections import defaultdict
 # --- Configuration ---
 API_KEY = "c69bd9a20bccfbbe7b4f2e37a17b1a2f2332b423"
 MAX_UID = 15000          # Change as needed
-BATCH_SIZE = 10000       # Adjust based on performance
-CONCURRENCY = 800
+BATCH_SIZE = 15000       # Adjust based on performance
+CONCURRENCY = 15000
 
 MONGO_URI = "mongodb+srv://kandulas:7WiHXWMQZH3DVvyr@cluster0.jsark.mongodb.net/"
 DATABASE_NAME = "aqidb"
