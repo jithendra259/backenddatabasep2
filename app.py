@@ -10,9 +10,9 @@ MAX_UID = 15000
 BATCH_SIZE = 10000
 CONCURRENCY = 800
 
-MONGO_URI = "mongodb+srv://kandulas:7WiHXWMQZH3DVvyr@cluster0.jsark.mongodb.net/"
-DATABASE_NAME = "aqidb"
-COLLECTION_NAME = "waqi_stations"
+MONGO_URI = "mongodb+srv://kandulajithendra:QDwYiLbdHvAuvPV9@cluster0.7jy4klk.mongodb.net/"
+DATABASE_NAME = "aqidb1"
+COLLECTION_NAME = "waqi_stations1"
 
 # --- MongoDB Setup ---
 client = pymongo.MongoClient(MONGO_URI)
