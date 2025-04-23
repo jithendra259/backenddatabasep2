@@ -10,7 +10,7 @@ MAX_UID = 15000
 BATCH_SIZE = 10000
 CONCURRENCY = 800
 
-MONGO_URI = "mongodb+srv://kandulas:nW2kmyupZDuAw751@cluster0.gv74jnl.mongodb.net/"
+MONGO_URI = "mongodb+srv://kandulajithendra3:9704400336kjss@cluster0.l5uwe09.mongodb.net/"
 DATABASE_NAME = "aqidb2"
 COLLECTION_NAME = "waqi_stations2"
 
